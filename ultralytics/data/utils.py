@@ -15,6 +15,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import zstandard
 from PIL import Image, ImageOps
 
 from ultralytics.nn.autobackend import check_class_names
@@ -42,14 +43,31 @@ VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "
 FORMATS_HELP_MSG = f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
 
 
-def img2label_paths(img_paths: list[str]) -> list[str]:
+def __select(x: str, t: str) -> str:
+    sa, sb, sc = f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}", f"{os.sep}{t}_labels{os.sep}"  # /images/, /labels/ substrings
+    bb = sb.join(x.rsplit(sa, 1)).rsplit(".", 1)[0] + ".txt"
+    bbz = bb + '.zstd'
+    cc = sc.join(x.rsplit(sa, 1)).rsplit(".", 1)[0] + ".txt"
+    ccz = cc + '.zstd'
+    if os.path.exists(bb):
+        return bb
+    elif os.path.exists(cc):
+        return cc
+    elif os.path.exists(bbz):
+        return bbz
+    elif os.path.exists(ccz):
+        return ccz
+    else:
+        raise FileNotFoundError(f'Label file not found for image: {x} {bb=} {cc=}')
+
+
+def img2label_paths(img_paths: list[str], task: str | None = None) -> list[str]:
     """Convert image paths to label paths by replacing 'images' with 'labels' and extension with '.txt'."""
-    sa, sb = f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}"  # /images/, /labels/ substrings
-    return [sb.join(x.rsplit(sa, 1)).rsplit(".", 1)[0] + ".txt" for x in img_paths]
+    return [__select(x, task) for x in img_paths]
 
 
 def check_file_speeds(
-    files: list[str], threshold_ms: float = 10, threshold_mb: float = 50, max_files: int = 5, prefix: str = ""
+        files: list[str], threshold_ms: float = 10, threshold_mb: float = 50, max_files: int = 5, prefix: str = ""
 ):
     """Check dataset file access speed and provide performance feedback.
 
@@ -179,7 +197,7 @@ def verify_image(args: tuple) -> tuple:
 
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
+    im_file, lb_file, prefix, keypoint, segment, num_cls, nkpt, ndim, single_cls = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -200,14 +218,40 @@ def verify_image_label(args: tuple) -> list:
         # Verify labels
         if os.path.isfile(lb_file):
             nf = 1  # label found
-            with open(lb_file, encoding="utf-8") as f:
-                lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+            if lb_file.endswith('.txt.zstd'):
+                with zstandard.open(lb_file) as f:
+                    lb = f.read()
+            elif lb_file.endswith('.txt'):
+                with open(lb_file, encoding="utf-8") as f:
+                    lb = f.read()
+            else:
+                raise NotImplementedError(f'can not prase {lb_file}')
+            lb = [x.split() for x in lb.strip().splitlines() if len(x)]
+            if nl := len(lb):
+                if keypoint and segment:
+                    classes = np.concatenate([
+                        np.array([x[0:5] for x in lb], dtype=np.float32),
+                        np.zeros((len(lb), nkpt * ndim), dtype=np.float32)
+                    ], axis=1)
+                    for i, x in enumerate(lb):
+                        classes[i, 5:5 + int(x[5]) * ndim] = np.array(x[6:6 + int(x[5]) * ndim])
+                    segments = []
+                    for i, x in enumerate(lb):
+                        _seg_start = 6 + int(x[5]) * ndim
+                        _seg_count, _seg = int(x[_seg_start]), []
+                        _seg_start += 1
+                        for _ in range(_seg_count):
+                            _n = int(x[_seg_start])
+                            _seg.append(np.array(x[_seg_start + 1:_seg_start + 1 + _n * 2], dtype=np.float32).reshape(-1, 2))
+                            _seg_start += _n * 2 + 1
+                        assert _seg_start == len(x), f'label length mismatch: {_seg_start} vs {len(x)}'
+                        segments.append(_seg)
+                    lb = classes
+                elif any(len(x) > 6 for x in lb) and (not keypoint) and not (keypoint and segment):  # is yolo style segment
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
-                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                    segments = [[np.array(x[1:], dtype=np.float32).reshape(-1, 2)] for x in lb]  # (cls, xy1...)
                     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32)
-            if nl := len(lb):
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
@@ -293,7 +337,7 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
 
 
 def polygon2mask(
-    imgsz: tuple[int, int], polygons: list[np.ndarray], color: int = 1, downsample_ratio: int = 1
+        imgsz: tuple[int, int], polygons: list[np.ndarray], color: int = 1, downsample_ratio: int = 1
 ) -> np.ndarray:
     """Convert a list of polygons to a binary mask of the specified image size.
 
@@ -308,8 +352,8 @@ def polygon2mask(
         (np.ndarray): A binary mask of the specified image size with the polygons filled in.
     """
     mask = np.zeros(imgsz, dtype=np.uint8)
-    polygons = np.asarray(polygons, dtype=np.int32)
-    polygons = polygons.reshape((polygons.shape[0], -1, 2))
+    assert all(len(p.shape) == 2 and p.shape[1] == 2 for p in polygons)
+    polygons = [np.asarray(p, dtype=np.int32) for p in polygons]
     cv2.fillPoly(mask, polygons, color=color)
     nh, nw = (imgsz[0] // downsample_ratio, imgsz[1] // downsample_ratio)
     # Note: fillPoly first then resize is trying to keep the same loss calculation method when mask-ratio=1
@@ -317,13 +361,13 @@ def polygon2mask(
 
 
 def polygons2masks(
-    imgsz: tuple[int, int], polygons: list[np.ndarray], color: int, downsample_ratio: int = 1
+        imgsz: tuple[int, int], polygons: list[list[np.ndarray]], color: int, downsample_ratio: int = 1
 ) -> np.ndarray:
     """Convert a list of polygons to a set of binary masks of the specified image size.
 
     Args:
         imgsz (tuple[int, int]): The size of the image as (height, width).
-        polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where N is the
+        polygons (list[list[np.ndarray]]): A list of polygons. Each polygon is an array with shape (N, M), where N is the
             number of polygons, and M is the number of points such that M % 2 = 0.
         color (int): The color value to fill in the polygons on the masks.
         downsample_ratio (int, optional): Factor by which to downsample each mask.
@@ -331,11 +375,11 @@ def polygons2masks(
     Returns:
         (np.ndarray): A set of binary masks of the specified image size with the polygons filled in.
     """
-    return np.array([polygon2mask(imgsz, [x.reshape(-1)], color, downsample_ratio) for x in polygons])
+    return np.array([polygon2mask(imgsz, x, color, downsample_ratio) for x in polygons])
 
 
 def polygons2masks_overlap(
-    imgsz: tuple[int, int], segments: list[np.ndarray], downsample_ratio: int = 1
+        imgsz: tuple[int, int], segments: list[list[np.ndarray]], downsample_ratio: int = 1
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return a (640, 640) overlap mask."""
     masks = np.zeros(
@@ -347,7 +391,7 @@ def polygons2masks_overlap(
     for segment in segments:
         mask = polygon2mask(
             imgsz,
-            [segment.reshape(-1)],
+            segment,
             downsample_ratio=downsample_ratio,
             color=1,
         )

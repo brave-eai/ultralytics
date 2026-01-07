@@ -84,6 +84,8 @@ def segment2box(segment, width: int = 640, height: int = 640):
     Returns:
         (np.ndarray): Bounding box coordinates in xyxy format [x1, y1, x2, y2].
     """
+    if isinstance(segment, list):
+        segment = np.concatenate(segment, axis=0)
     x, y = segment.T  # segment xy
     # Clip coordinates if 3 out of 4 sides are outside the image
     if np.array([x.min() < 0, y.min() < 0, x.max() > width, y.max() > height]).sum() >= 3:
@@ -375,7 +377,7 @@ def xywhr2xyxyxyxy(x):
     )
 
     ctr = x[..., :2]
-    w, h, angle = (x[..., i : i + 1] for i in range(2, 5))
+    w, h, angle = (x[..., i: i + 1] for i in range(2, 5))
     cos_value, sin_value = cos(angle), sin(angle)
     vec1 = [w / 2 * cos_value, w / 2 * sin_value]
     vec2 = [-h / 2 * sin_value, h / 2 * cos_value]
@@ -414,12 +416,12 @@ def segments2boxes(segments):
     """
     boxes = []
     for s in segments:
-        x, y = s.T  # segment xy
+        x, y = np.concatenate(s, axis=0).T  # segment xy
         boxes.append([x.min(), y.min(), x.max(), y.max()])  # cls, xyxy
     return xyxy2xywh(np.array(boxes))  # cls, xywh
 
 
-def resample_segments(segments, n: int = 1000):
+def resample_segments(segments: list | np.ndarray, n: int = 1000):
     """Resample segments to n points each using linear interpolation.
 
     Args:
@@ -429,17 +431,15 @@ def resample_segments(segments, n: int = 1000):
     Returns:
         (list): Resampled segments with n points each.
     """
-    for i, s in enumerate(segments):
-        if len(s) == n:
-            continue
-        s = np.concatenate((s, s[0:1, :]), axis=0)
-        x = np.linspace(0, len(s) - 1, n - len(s) if len(s) < n else n)
-        xp = np.arange(len(s))
-        x = np.insert(x, np.searchsorted(x, xp), xp) if len(s) < n else x
-        segments[i] = (
-            np.concatenate([np.interp(x, xp, s[:, i]) for i in range(2)], dtype=np.float32).reshape(2, -1).T
-        )  # segment xy
-    return segments
+    if isinstance(segments, list):
+        return [resample_segments(s, n) for s in segments]
+    if len(segments) >= n:
+        return segments
+    segments = np.concatenate((segments, segments[0:1, :]), axis=0)
+    x = np.linspace(0, len(segments) - 1, n - len(segments) if len(segments) < n else n)
+    xp = np.arange(len(segments))
+    x = np.insert(x, np.searchsorted(x, xp), xp) if len(segments) < n else x
+    return np.concatenate([np.interp(x, xp, segments[:, i]) for i in range(2)], dtype=np.float32).reshape(2, -1).T
 
 
 def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
@@ -516,10 +516,10 @@ def process_mask_native(protos, masks_in, bboxes, shape):
 
 
 def scale_masks(
-    masks: torch.Tensor,
-    shape: tuple[int, int],
-    ratio_pad: tuple[tuple[int, int], tuple[int, int]] | None = None,
-    padding: bool = True,
+        masks: torch.Tensor,
+        shape: tuple[int, int],
+        ratio_pad: tuple[tuple[int, int], tuple[int, int]] | None = None,
+        padding: bool = True,
 ) -> torch.Tensor:
     """Rescale segment masks to target shape.
 
@@ -662,3 +662,15 @@ def clean_str(s):
 def empty_like(x):
     """Create empty torch.Tensor or np.ndarray with same shape as input and float32 dtype."""
     return torch.empty_like(x, dtype=x.dtype) if isinstance(x, torch.Tensor) else np.empty_like(x, dtype=x.dtype)
+
+
+def points_affine_transform(segments: np.ndarray | list[np.ndarray] | list[list[np.ndarray]], M: np.ndarray):
+    """Apply affine transformation to segments using transformation matrix M."""
+    if isinstance(segments, list):
+        return [points_affine_transform(s, M) for s in segments]
+    segments = np.concatenate([
+        segments,
+        np.ones(segments.shape[:-1] + (1,), dtype=segments.dtype)
+    ], axis=-1)
+    segments = np.einsum('...ij,kj->...ik', segments, M)
+    return segments[..., :2] / segments[..., 2:3]

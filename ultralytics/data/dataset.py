@@ -17,9 +17,8 @@ from torch.utils.data import ConcatDataset
 
 from ultralytics.utils import LOCAL_RANK, LOGGER, NUM_THREADS, TQDM, colorstr
 from ultralytics.utils.instance import Instances
-from ultralytics.utils.ops import resample_segments, segments2boxes
+from ultralytics.utils.ops import segments2boxes
 from ultralytics.utils.torch_utils import TORCHVISION_0_18
-
 from .augment import (
     Compose,
     Format,
@@ -76,15 +75,17 @@ class YOLODataset(BaseDataset):
 
         Args:
             data (dict, optional): Dataset configuration dictionary.
-            task (str): Task type, one of 'detect', 'segment', 'pose', or 'obb'.
+            task (str): Task type, one of 'detect', 'segment', 'pose', 'obb' or 'pose_segment'.
             *args (Any): Additional positional arguments for the parent class.
             **kwargs (Any): Additional keyword arguments for the parent class.
         """
-        self.use_segments = task == "segment"
-        self.use_keypoints = task == "pose"
+        assert task in {'detect', 'segment', 'pose', 'obb', 'pose_segment'}
+        self.task = task
+        self.use_segments = task == "segment" or task == 'pose_segment'
+        self.use_keypoints = task == "pose" or task == 'pose_segment'
         self.use_obb = task == "obb"
         self.data = data
-        assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
+        # assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
@@ -114,6 +115,7 @@ class YOLODataset(BaseDataset):
                     self.label_files,
                     repeat(self.prefix),
                     repeat(self.use_keypoints),
+                    repeat(self.use_segments),
                     repeat(len(self.data["names"])),
                     repeat(nkpt),
                     repeat(ndim),
@@ -162,7 +164,7 @@ class YOLODataset(BaseDataset):
         Returns:
             (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
         """
-        self.label_files = img2label_paths(self.im_files)
+        self.label_files = img2label_paths(self.im_files, task=self.task)
         cache_path = Path(self.label_files[0]).parent.with_suffix(".cache")
         try:
             cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
@@ -266,16 +268,16 @@ class YOLODataset(BaseDataset):
         normalized = label.pop("normalized")
 
         # NOTE: do NOT resample oriented boxes
-        segment_resamples = 100 if self.use_obb else 1000
-        if len(segments) > 0:
-            # make sure segments interpolate correctly if original length is greater than segment_resamples
-            max_len = max(len(s) for s in segments)
-            segment_resamples = (max_len + 1) if segment_resamples < max_len else segment_resamples
-            # list[np.array(segment_resamples, 2)] * num_samples
-            segments = np.stack(resample_segments(segments, n=segment_resamples), axis=0)
-        else:
-            segments = np.zeros((0, segment_resamples, 2), dtype=np.float32)
-        label["instances"] = Instances(bboxes, segments, keypoints, bbox_format=bbox_format, normalized=normalized)
+        # segment_resamples = 100 if self.use_obb else 1000
+        # if len(segments) > 0:
+        #     # make sure segments interpolate correctly if original length is greater than segment_resamples
+        #     max_len = max(len(s) for s in segments)
+        #     segment_resamples = (max_len + 1) if segment_resamples < max_len else segment_resamples
+        #     # list[np.array(segment_resamples, 2)] * num_samples
+        #     segments = np.stack(resample_segments(segments, n=segment_resamples), axis=0)
+        # else:
+        #     segments = np.zeros((0, segment_resamples, 2), dtype=np.float32)
+        label["instances"] = Instances(bboxes=bboxes, segments=segments, keypoints=keypoints, bbox_format=bbox_format, normalized=normalized)
         return label
 
     @staticmethod
@@ -521,7 +523,7 @@ class GroundingDataset(YOLODataset):
                     continue
 
                 caption = img["caption"]
-                cat_name = " ".join([caption[t[0] : t[1]] for t in ann["tokens_positive"]]).lower().strip()
+                cat_name = " ".join([caption[t[0]: t[1]] for t in ann["tokens_positive"]]).lower().strip()
                 if not cat_name:
                     continue
 

@@ -18,7 +18,7 @@ from ultralytics.utils import LOGGER, IterableSimpleNamespace, colorstr
 from ultralytics.utils.checks import check_version
 from ultralytics.utils.instance import Instances
 from ultralytics.utils.metrics import bbox_ioa
-from ultralytics.utils.ops import segment2box, xywh2xyxy, xyxyxyxy2xywhr
+from ultralytics.utils.ops import segment2box, xywh2xyxy, xyxyxyxy2xywhr, points_affine_transform
 from ultralytics.utils.torch_utils import TORCHVISION_0_10, TORCHVISION_0_11, TORCHVISION_0_13
 
 DEFAULT_MEAN = (0.0, 0.0, 0.0)
@@ -599,7 +599,7 @@ class Mosaic(BaseMixTransform):
             padw, padh = c[:2]
             x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coordinates
 
-            img3[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img3[ymin:ymax, xmin:xmax]
+            img3[y1:y2, x1:x2] = img[y1 - padh:, x1 - padw:]  # img3[ymin:ymax, xmin:xmax]
             # hp, wp = h, w  # height, width previous for next iteration
 
             # Labels assuming imgsz*2 mosaic size
@@ -607,7 +607,7 @@ class Mosaic(BaseMixTransform):
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
 
-        final_labels["img"] = img3[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
+        final_labels["img"] = img3[-self.border[0]: self.border[0], -self.border[1]: self.border[1]]
         return final_labels
 
     def _mosaic4(self, labels: dict[str, Any]) -> dict[str, Any]:
@@ -729,7 +729,7 @@ class Mosaic(BaseMixTransform):
             x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coordinates
 
             # Image
-            img9[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img9[ymin:ymax, xmin:xmax]
+            img9[y1:y2, x1:x2] = img[y1 - padh:, x1 - padw:]  # img9[ymin:ymax, xmin:xmax]
             hp, wp = h, w  # height, width previous for next iteration
 
             # Labels assuming imgsz*2 mosaic size
@@ -737,7 +737,7 @@ class Mosaic(BaseMixTransform):
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
 
-        final_labels["img"] = img9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
+        final_labels["img"] = img9[-self.border[0]: self.border[0], -self.border[1]: self.border[1]]
         return final_labels
 
     @staticmethod
@@ -1023,14 +1023,14 @@ class RandomPerspective:
     """
 
     def __init__(
-        self,
-        degrees: float = 0.0,
-        translate: float = 0.1,
-        scale: float = 0.5,
-        shear: float = 0.0,
-        perspective: float = 0.0,
-        border: tuple[int, int] = (0, 0),
-        pre_transform=None,
+            self,
+            degrees: float = 0.0,
+            translate: float = 0.1,
+            scale: float = 0.5,
+            shear: float = 0.0,
+            perspective: float = 0.0,
+            border: tuple[int, int] = (0, 0),
+            pre_transform=None,
     ):
         """Initialize RandomPerspective object with transformation parameters.
 
@@ -1151,41 +1151,6 @@ class RandomPerspective:
         y = xy[:, [1, 3, 5, 7]]
         return np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1)), dtype=bboxes.dtype).reshape(4, n).T
 
-    def apply_segments(self, segments: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Apply affine transformations to segments and generate new bounding boxes.
-
-        This function applies affine transformations to input segments and generates new bounding boxes based on the
-        transformed segments. It clips the transformed segments to fit within the new bounding boxes.
-
-        Args:
-            segments (np.ndarray): Input segments with shape (N, M, 2), where N is the number of segments and M is the
-                number of points in each segment.
-            M (np.ndarray): Affine transformation matrix with shape (3, 3).
-
-        Returns:
-            bboxes (np.ndarray): New bounding boxes with shape (N, 4) in xyxy format.
-            segments (np.ndarray): Transformed and clipped segments with shape (N, M, 2).
-
-        Examples:
-            >>> segments = np.random.rand(10, 500, 2)  # 10 segments with 500 points each
-            >>> M = np.eye(3)  # Identity transformation matrix
-            >>> new_bboxes, new_segments = apply_segments(segments, M)
-        """
-        n, num = segments.shape[:2]
-        if n == 0:
-            return [], segments
-
-        xy = np.ones((n * num, 3), dtype=segments.dtype)
-        segments = segments.reshape(-1, 2)
-        xy[:, :2] = segments
-        xy = xy @ M.T  # transform
-        xy = xy[:, :2] / xy[:, 2:3]
-        segments = xy.reshape(n, -1, 2)
-        bboxes = np.stack([segment2box(xy, self.size[0], self.size[1]) for xy in segments], 0)
-        segments[..., 0] = segments[..., 0].clip(bboxes[:, 0:1], bboxes[:, 2:3])
-        segments[..., 1] = segments[..., 1].clip(bboxes[:, 1:2], bboxes[:, 3:4])
-        return bboxes, segments
-
     def apply_keypoints(self, keypoints: np.ndarray, M: np.ndarray) -> np.ndarray:
         """Apply affine transformation to keypoints.
 
@@ -1210,14 +1175,11 @@ class RandomPerspective:
         n, nkpt = keypoints.shape[:2]
         if n == 0:
             return keypoints
-        xy = np.ones((n * nkpt, 3), dtype=keypoints.dtype)
-        visible = keypoints[..., 2].reshape(n * nkpt, 1)
-        xy[:, :2] = keypoints[..., :2].reshape(n * nkpt, 2)
-        xy = xy @ M.T  # transform
-        xy = xy[:, :2] / xy[:, 2:3]  # perspective rescale or affine
-        out_mask = (xy[:, 0] < 0) | (xy[:, 1] < 0) | (xy[:, 0] > self.size[0]) | (xy[:, 1] > self.size[1])
+        visible = keypoints[..., 2:]
+        xy = points_affine_transform(keypoints[..., :2], M)
+        out_mask = (xy[..., 0] < 0) | (xy[..., 1] < 0) | (xy[..., 0] > self.size[0]) | (xy[..., 1] > self.size[1])
         visible[out_mask] = 0
-        return np.concatenate([xy, visible], axis=-1).reshape(n, nkpt, 3)
+        return np.concatenate([xy, visible], axis=-1)
 
     def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Apply random perspective and affine transformations to an image and its associated labels.
@@ -1276,12 +1238,19 @@ class RandomPerspective:
 
         segments = instances.segments
         keypoints = instances.keypoints
-        # Update bboxes if there are segments.
-        if len(segments):
-            bboxes, segments = self.apply_segments(segments, M)
 
         if keypoints is not None:
             keypoints = self.apply_keypoints(keypoints, M)
+
+        # Update bboxes if there are segments.
+        if segments is not None and len(segments) != 0:
+            segments = points_affine_transform(segments, M)
+            # bbox also need to include all the keypoints
+            bboxes = np.stack([segment2box(xy + ([keypoints[i][keypoints[i, ..., 2] > 0.1, :2]] if keypoints is not None else []), self.size[0], self.size[1]) for i, xy in enumerate(segments)], 0)
+            for i in range(len(segments)):
+                for j in range(len(segments[i])):
+                    segments[i][j] = np.clip(segments[i][j], bboxes[i][0:2][np.newaxis, :], bboxes[i][2:4][np.newaxis, :])
+
         new_instances = Instances(bboxes, segments, keypoints, bbox_format="xyxy", normalized=False)
         # Clip
         new_instances.clip(*self.size)
@@ -1300,12 +1269,12 @@ class RandomPerspective:
 
     @staticmethod
     def box_candidates(
-        box1: np.ndarray,
-        box2: np.ndarray,
-        wh_thr: int = 2,
-        ar_thr: int = 100,
-        area_thr: float = 0.1,
-        eps: float = 1e-16,
+            box1: np.ndarray,
+            box2: np.ndarray,
+            wh_thr: int = 2,
+            ar_thr: int = 100,
+            area_thr: float = 0.1,
+            eps: float = 1e-16,
     ) -> np.ndarray:
         """Compute candidate boxes for further processing based on size and aspect ratio criteria.
 
@@ -1531,15 +1500,15 @@ class LetterBox:
     """
 
     def __init__(
-        self,
-        new_shape: tuple[int, int] = (640, 640),
-        auto: bool = False,
-        scale_fill: bool = False,
-        scaleup: bool = True,
-        center: bool = True,
-        stride: int = 32,
-        padding_value: int = 114,
-        interpolation: int = cv2.INTER_LINEAR,
+            self,
+            new_shape: tuple[int, int] = (640, 640),
+            auto: bool = False,
+            scale_fill: bool = False,
+            scaleup: bool = True,
+            center: bool = True,
+            stride: int = 32,
+            padding_value: int = 114,
+            interpolation: int = cv2.INTER_LINEAR,
     ):
         """Initialize LetterBox object for resizing and padding images.
 
@@ -1629,7 +1598,7 @@ class LetterBox:
             )
         else:  # multispectral
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
-            pad_img[top : top + h, left : left + w] = img
+            pad_img[top: top + h, left: left + w] = img
             img = pad_img
 
         if labels.get("ratio_pad"):
@@ -1985,16 +1954,16 @@ class Format:
     """
 
     def __init__(
-        self,
-        bbox_format: str = "xywh",
-        normalize: bool = True,
-        return_mask: bool = False,
-        return_keypoint: bool = False,
-        return_obb: bool = False,
-        mask_ratio: int = 4,
-        mask_overlap: bool = True,
-        batch_idx: bool = True,
-        bgr: float = 0.0,
+            self,
+            bbox_format: str = "xywh",
+            normalize: bool = True,
+            return_mask: bool = False,
+            return_keypoint: bool = False,
+            return_obb: bool = False,
+            mask_ratio: int = 4,
+            mask_overlap: bool = True,
+            batch_idx: bool = True,
+            bgr: float = 0.0,
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2121,7 +2090,7 @@ class Format:
         return img
 
     def _format_segments(
-        self, instances: Instances, cls: np.ndarray, w: int, h: int
+            self, instances: Instances, cls: np.ndarray, w: int, h: int
     ) -> tuple[np.ndarray, Instances, np.ndarray]:
         """Convert polygon segments to bitmap masks.
 
@@ -2203,11 +2172,11 @@ class LoadVisualPrompt:
         return labels
 
     def get_visuals(
-        self,
-        category: int | np.ndarray | torch.Tensor,
-        shape: tuple[int, int],
-        bboxes: np.ndarray | torch.Tensor = None,
-        masks: np.ndarray | torch.Tensor = None,
+            self,
+            category: int | np.ndarray | torch.Tensor,
+            shape: tuple[int, int],
+            bboxes: np.ndarray | torch.Tensor = None,
+            masks: np.ndarray | torch.Tensor = None,
     ) -> torch.Tensor:
         """Generate visual masks based on bounding boxes or masks.
 
@@ -2275,12 +2244,12 @@ class RandomLoadText:
     """
 
     def __init__(
-        self,
-        prompt_format: str = "{}",
-        neg_samples: tuple[int, int] = (80, 80),
-        max_samples: int = 80,
-        padding: bool = False,
-        padding_value: list[str] = [""],
+            self,
+            prompt_format: str = "{}",
+            neg_samples: tuple[int, int] = (80, 80),
+            max_samples: int = 80,
+            padding: bool = False,
+            padding_value: list[str] = [""],
     ) -> None:
         """Initialize the RandomLoadText class for randomly sampling positive and negative texts.
 
@@ -2445,11 +2414,11 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace, stretch: bo
 
 # Classification augmentations -----------------------------------------------------------------------------------------
 def classify_transforms(
-    size: tuple[int, int] | int = 224,
-    mean: tuple[float, float, float] = DEFAULT_MEAN,
-    std: tuple[float, float, float] = DEFAULT_STD,
-    interpolation: str = "BILINEAR",
-    crop_fraction: float | None = None,
+        size: tuple[int, int] | int = 224,
+        mean: tuple[float, float, float] = DEFAULT_MEAN,
+        std: tuple[float, float, float] = DEFAULT_STD,
+        interpolation: str = "BILINEAR",
+        crop_fraction: float | None = None,
 ):
     """Create a composition of image transforms for classification tasks.
 
@@ -2495,20 +2464,20 @@ def classify_transforms(
 
 # Classification training augmentations --------------------------------------------------------------------------------
 def classify_augmentations(
-    size: int = 224,
-    mean: tuple[float, float, float] = DEFAULT_MEAN,
-    std: tuple[float, float, float] = DEFAULT_STD,
-    scale: tuple[float, float] | None = None,
-    ratio: tuple[float, float] | None = None,
-    hflip: float = 0.5,
-    vflip: float = 0.0,
-    auto_augment: str | None = None,
-    hsv_h: float = 0.015,  # image HSV-Hue augmentation (fraction)
-    hsv_s: float = 0.4,  # image HSV-Saturation augmentation (fraction)
-    hsv_v: float = 0.4,  # image HSV-Value augmentation (fraction)
-    force_color_jitter: bool = False,
-    erasing: float = 0.0,
-    interpolation: str = "BILINEAR",
+        size: int = 224,
+        mean: tuple[float, float, float] = DEFAULT_MEAN,
+        std: tuple[float, float, float] = DEFAULT_STD,
+        scale: tuple[float, float] | None = None,
+        ratio: tuple[float, float] | None = None,
+        hflip: float = 0.5,
+        vflip: float = 0.0,
+        auto_augment: str | None = None,
+        hsv_h: float = 0.015,  # image HSV-Hue augmentation (fraction)
+        hsv_s: float = 0.4,  # image HSV-Saturation augmentation (fraction)
+        hsv_v: float = 0.4,  # image HSV-Value augmentation (fraction)
+        force_color_jitter: bool = False,
+        erasing: float = 0.0,
+        interpolation: str = "BILINEAR",
 ):
     """Create a composition of image augmentation transforms for classification tasks.
 
@@ -2667,7 +2636,7 @@ class ClassifyLetterBox:
 
         # Create padded image
         im_out = np.full((hs, ws, 3), 114, dtype=im.dtype)
-        im_out[top : top + h, left : left + w] = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
+        im_out[top: top + h, left: left + w] = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
         return im_out
 
 
@@ -2733,7 +2702,7 @@ class CenterCrop:
         imh, imw = im.shape[:2]
         m = min(imh, imw)  # min dimension
         top, left = (imh - m) // 2, (imw - m) // 2
-        return cv2.resize(im[top : top + m, left : left + m], (self.w, self.h), interpolation=cv2.INTER_LINEAR)
+        return cv2.resize(im[top: top + m, left: left + m], (self.w, self.h), interpolation=cv2.INTER_LINEAR)
 
 
 # NOTE: keep this class for backward compatibility
