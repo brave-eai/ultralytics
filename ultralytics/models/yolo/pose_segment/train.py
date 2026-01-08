@@ -8,7 +8,7 @@ from typing import Any
 
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import PoseSegmentationModel
-from ultralytics.utils import DEFAULT_CFG
+from ultralytics.utils import DEFAULT_CFG, RANK
 
 
 class PoseSegmentationTrainer(yolo.detect.DetectionTrainer):
@@ -24,9 +24,7 @@ class PoseSegmentationTrainer(yolo.detect.DetectionTrainer):
             weights: str | Path | None = None,
             verbose: bool = True,
     ) -> PoseSegmentationModel:
-        model = PoseSegmentationModel(
-            cfg, nc=self.data["nc"], ch=self.data["channels"], data_kpt_shape=self.data["kpt_shape"], verbose=verbose
-        )
+        model = PoseSegmentationModel(cfg, nc=self.data["nc"], ch=self.data["channels"], data_kpt_shape=self.data["kpt_shape"], verbose=verbose and RANK == -1)
         if weights:
             model.load(weights)
         return model
@@ -41,7 +39,7 @@ class PoseSegmentationTrainer(yolo.detect.DetectionTrainer):
         self.model.kpt_names = kpt_names
 
     def get_validator(self):
-        self.loss_names = "box_loss", "pose_loss", "kobj_loss", "cls_loss", "dfl_loss"
+        self.loss_names = "box_loss", "pose_loss", "kobj_loss", "seg_loss", "cls_loss", "dfl_loss"
         return yolo.pose_segment.PoseSegmentationValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )

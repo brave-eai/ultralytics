@@ -592,6 +592,9 @@ class PoseModel(DetectionModel):
 
 
 class PoseSegmentationModel(PoseModel):
+    def __init__(self, cfg="yolo11n-pose_segment.yaml", ch=3, nc=None, data_kpt_shape=(None, None), verbose=True):
+        super().__init__(cfg=cfg, ch=ch, nc=nc, data_kpt_shape=data_kpt_shape, verbose=verbose)
+
     def init_criterion(self):
         """Initialize the loss criterion for the PoseModel."""
         return v8PoseSegmentationLoss(self)

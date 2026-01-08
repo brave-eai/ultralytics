@@ -75,14 +75,14 @@ class Detect(nn.Module):
     legacy = False  # backward compatibility for v3/v5/v8/v9 models
     xyxy = False  # xyxy or xywh output
 
-    def __init__(self, nc: int = 80, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ch: tuple = (), *args, **kwargs):
         """Initialize the YOLO detection layer with specified number of classes and channels.
 
         Args:
             nc (int): Number of classes.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
@@ -232,7 +232,7 @@ class Segment(Detect):
         >>> outputs = segment(x)
     """
 
-    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, ch: tuple = ()):
+    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, ch: tuple = (), *args, **kwargs):
         """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers.
 
         Args:
@@ -241,20 +241,21 @@ class Segment(Detect):
             npr (int): Number of protos.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.proto = Proto(ch[0], self.npr, self.nm)  # protos
 
-        c4 = max(ch[0] // 4, self.nm)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
+        if not hasattr(self, 'cv4'):
+            c4 = max(ch[0] // 4, self.nm)
+            self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor]:
         """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
         p = self.proto(x[0])  # mask protos
         bs = p.shape[0]  # batch size
 
-        mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
+        mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], -1)  # mask coefficients
         x = Detect.forward(self, x)
         if self.training:
             return x, mc, p
@@ -282,7 +283,7 @@ class OBB(Detect):
         >>> outputs = obb(x)
     """
 
-    def __init__(self, nc: int = 80, ne: int = 1, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ne: int = 1, ch: tuple = (), *args, **kwargs):
         """Initialize OBB with number of classes `nc` and layer channels `ch`.
 
         Args:
@@ -290,7 +291,7 @@ class OBB(Detect):
             ne (int): Number of extra parameters.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         self.ne = ne  # number of extra parameters
 
         c4 = max(ch[0] // 4, self.ne)
@@ -336,7 +337,7 @@ class Pose(Detect):
         >>> outputs = pose(x)
     """
 
-    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), ch: tuple = ()):
+    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), ch: tuple = (), *args, **kwargs):
         """Initialize YOLO network with default parameters and Convolutional Layers.
 
         Args:
@@ -344,12 +345,13 @@ class Pose(Detect):
             kpt_shape (tuple): Number of keypoints, number of dims (2 for x,y or 3 for x,y,visible).
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
-        self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
+        self.nk: int = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
 
-        c4 = max(ch[0] // 4, self.nk)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
+        if not hasattr(self, 'cv4'):
+            c4 = max(ch[0] // 4, self.nk)
+            self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
 
     def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
         """Perform forward pass through YOLO model and return predictions."""
@@ -383,8 +385,24 @@ class Pose(Detect):
             return y
 
 
-class PoseSegment(Pose):
-    ...
+class PoseSegment(Pose, Segment):
+    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), nm: int = 32, npr: int = 256, ch: tuple = (), *args, **kwargs):
+        self.cv4 = None
+        super().__init__(nc=nc, kpt_shape=kpt_shape, ch=ch, nm=nm, npr=npr, *args, **kwargs)
+        c4 = max(ch[0] // 4, self.nm + self.nk)
+        assert self.cv4 is None
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm + self.nk, 1)) for x in ch)
+
+    def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
+        p = self.proto(x[0])  # mask protos
+        bs = p.shape[0]  # batch size
+
+        kpt, mc = torch.split(torch.cat([self.cv4[i](x[i]).view(bs, self.nm + self.nk, -1) for i in range(self.nl)], -1), [self.nk, self.nm], dim=-2)
+        x = Detect.forward(self, x)
+        if self.training:
+            return x, kpt, mc, p
+        pred_kpt = self.kpts_decode(bs, kpt)
+        return torch.cat([x, pred_kpt], 1) if self.export else (torch.cat([x[0], pred_kpt], 1), (x[1], kpt))
 
 
 class Classify(nn.Module):
@@ -462,7 +480,7 @@ class WorldDetect(Detect):
         >>> outputs = world_detect(x, text)
     """
 
-    def __init__(self, nc: int = 80, embed: int = 512, with_bn: bool = False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, embed: int = 512, with_bn: bool = False, ch: tuple = (), *args, **kwargs):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
         Args:
@@ -471,7 +489,7 @@ class WorldDetect(Detect):
             with_bn (bool): Whether to use batch normalization in contrastive head.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         c3 = max(ch[0], min(self.nc, 100))
         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, embed, 1)) for x in ch)
         self.cv4 = nn.ModuleList(BNContrastiveHead(embed) if with_bn else ContrastiveHead() for _ in ch)
@@ -592,7 +610,7 @@ class YOLOEDetect(Detect):
 
     is_fused = False
 
-    def __init__(self, nc: int = 80, embed: int = 512, with_bn: bool = False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, embed: int = 512, with_bn: bool = False, ch: tuple = (), *args, **kwargs):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
         Args:
@@ -601,7 +619,7 @@ class YOLOEDetect(Detect):
             with_bn (bool): Whether to use batch normalization in contrastive head.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         c3 = max(ch[0], min(self.nc, 100))
         assert c3 <= embed
         assert with_bn
@@ -1161,14 +1179,14 @@ class v10Detect(Detect):
 
     end2end = True
 
-    def __init__(self, nc: int = 80, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ch: tuple = (), *args, **kwargs):
         """Initialize the v10Detect object with the specified number of classes and input channels.
 
         Args:
             nc (int): Number of classes.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, ch)
+        super().__init__(nc=nc, ch=ch, *args, **kwargs)
         c3 = max(ch[0], min(self.nc, 100))  # channels
         # Light cls head
         self.cv3 = nn.ModuleList(

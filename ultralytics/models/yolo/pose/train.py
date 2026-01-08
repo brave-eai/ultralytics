@@ -8,7 +8,7 @@ from typing import Any
 
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import PoseModel
-from ultralytics.utils import DEFAULT_CFG
+from ultralytics.utils import DEFAULT_CFG, RANK
 
 
 class PoseTrainer(yolo.detect.DetectionTrainer):
@@ -55,10 +55,10 @@ class PoseTrainer(yolo.detect.DetectionTrainer):
         super().__init__(cfg, overrides, _callbacks)
 
     def get_model(
-        self,
-        cfg: str | Path | dict[str, Any] | None = None,
-        weights: str | Path | None = None,
-        verbose: bool = True,
+            self,
+            cfg: str | Path | dict[str, Any] | None = None,
+            weights: str | Path | None = None,
+            verbose: bool = True,
     ) -> PoseModel:
         """Get pose estimation model with specified configuration and weights.
 
@@ -70,9 +70,7 @@ class PoseTrainer(yolo.detect.DetectionTrainer):
         Returns:
             (PoseModel): Initialized pose estimation model.
         """
-        model = PoseModel(
-            cfg, nc=self.data["nc"], ch=self.data["channels"], data_kpt_shape=self.data["kpt_shape"], verbose=verbose
-        )
+        model = PoseModel(cfg, nc=self.data["nc"], ch=self.data["channels"], data_kpt_shape=self.data["kpt_shape"], verbose=verbose and RANK == -1)
         if weights:
             model.load(weights)
 
