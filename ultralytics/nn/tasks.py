@@ -1640,6 +1640,8 @@ def parse_model(d, ch, verbose=True):
             args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
+            if m is PoseSegment:
+                args[3] = make_divisible(min(args[3], max_channels) * width, 8)
             if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, PoseSegment, OBB}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1

@@ -402,7 +402,7 @@ class PoseSegment(Pose, Segment):
         if self.training:
             return x, kpt, mc, p
         pred_kpt = self.kpts_decode(bs, kpt)
-        return torch.cat([x, pred_kpt], 1) if self.export else (torch.cat([x[0], pred_kpt], 1), (x[1], kpt))
+        return (torch.cat([x, pred_kpt, mc], 1), p) if self.export else (torch.cat([x[0], pred_kpt, mc], 1), (x[1], kpt, mc, p))
 
 
 class Classify(nn.Module):

@@ -76,6 +76,18 @@ class PoseValidator(DetectionValidator):
         batch["keypoints"] = batch["keypoints"].float()
         return batch
 
+    def init_metrics(self, model: torch.nn.Module) -> None:
+        """Initialize evaluation metrics for YOLO pose validation.
+
+        Args:
+            model (torch.nn.Module): Model to validate.
+        """
+        super().init_metrics(model)
+        self.kpt_shape = self.data["kpt_shape"]
+        is_pose = self.kpt_shape == [17, 3]
+        nkpt = self.kpt_shape[0]
+        self.sigma = OKS_SIGMA if is_pose else np.ones(nkpt) / nkpt
+
     def get_desc(self) -> str:
         """Return description of evaluation metrics in string format."""
         return ("%22s" + "%11s" * 10) % (
@@ -91,18 +103,6 @@ class PoseValidator(DetectionValidator):
             "mAP50",
             "mAP50-95)",
         )
-
-    def init_metrics(self, model: torch.nn.Module) -> None:
-        """Initialize evaluation metrics for YOLO pose validation.
-
-        Args:
-            model (torch.nn.Module): Model to validate.
-        """
-        super().init_metrics(model)
-        self.kpt_shape = self.data["kpt_shape"]
-        is_pose = self.kpt_shape == [17, 3]
-        nkpt = self.kpt_shape[0]
-        self.sigma = OKS_SIGMA if is_pose else np.ones(nkpt) / nkpt
 
     def postprocess(self, preds: torch.Tensor) -> dict[str, torch.Tensor]:
         """Postprocess YOLO predictions to extract and reshape keypoints for pose estimation.

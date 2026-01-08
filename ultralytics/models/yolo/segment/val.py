@@ -125,8 +125,8 @@ class SegmentationValidator(DetectionValidator):
         Returns:
             (dict[str, Any]): Prepared batch with processed annotations.
         """
-        prepared_batch = super()._prepare_batch(si, batch)
-        nl = prepared_batch["cls"].shape[0]
+        pbatch = super()._prepare_batch(si, batch)
+        nl = pbatch["cls"].shape[0]
         if self.args.overlap_mask:
             masks = batch["masks"][si]
             index = torch.arange(1, nl + 1, device=masks.device).view(nl, 1, 1)
@@ -134,12 +134,12 @@ class SegmentationValidator(DetectionValidator):
         else:
             masks = batch["masks"][batch["batch_idx"] == si]
         if nl:
-            mask_size = [s if self.process is ops.process_mask_native else s // 4 for s in prepared_batch["imgsz"]]
+            mask_size = [s if self.process is ops.process_mask_native else s // 4 for s in pbatch["imgsz"]]
             if masks.shape[1:] != mask_size:
                 masks = F.interpolate(masks[None], mask_size, mode="bilinear", align_corners=False)[0]
                 masks = masks.gt_(0.5)
-        prepared_batch["masks"] = masks
-        return prepared_batch
+        pbatch["masks"] = masks
+        return pbatch
 
     def _process_batch(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> dict[str, np.ndarray]:
         """Compute correct prediction matrix for a batch based on bounding boxes and optional masks.
