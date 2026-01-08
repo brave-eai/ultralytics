@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import random
@@ -824,7 +825,8 @@ def load_dataset_cache_file(path: Path) -> dict:
     import gc
 
     gc.disable()  # reduce pickle load time https://github.com/ultralytics/ultralytics/pull/1585
-    cache = np.load(str(path), allow_pickle=True).item()  # load dict
+    with gzip.open(str(path), "rb") as file:  # context manager here fixes windows async np.save bug
+        cache = np.load(file, allow_pickle=True).item()  # load dict
     gc.enable()
     return cache
 
@@ -835,7 +837,7 @@ def save_dataset_cache_file(prefix: str, path: Path, x: dict, version: str):
     if is_dir_writeable(path.parent):
         if path.exists():
             path.unlink()  # remove *.cache file if exists
-        with open(str(path), "wb") as file:  # context manager here fixes windows async np.save bug
+        with gzip.open(str(path), "wb") as file:  # context manager here fixes windows async np.save bug
             np.save(file, x)
         LOGGER.info(f"{prefix}New cache created: {path}")
     else:

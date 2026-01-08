@@ -733,35 +733,37 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
                 fg_mask,
             )
             # pose loss
-            keypoints = batch["keypoints"].to(self.device).float().clone()
-            keypoints[..., 0] *= imgsz[1]
-            keypoints[..., 1] *= imgsz[0]
+            if "keypoints" in batch:
+                keypoints = batch["keypoints"].to(self.device).float().clone()
+                keypoints[..., 0] *= imgsz[1]
+                keypoints[..., 1] *= imgsz[0]
 
-            loss[1], loss[2] = self.calculate_keypoints_loss(
-                fg_mask,
-                target_gt_idx,
-                keypoints,
-                batch_idx,
-                stride_tensor,
-                target_bboxes / stride_tensor,
-                pred_kpts,
-            )
+                loss[1], loss[2] = self.calculate_keypoints_loss(
+                    fg_mask,
+                    target_gt_idx,
+                    keypoints,
+                    batch_idx,
+                    stride_tensor,
+                    target_bboxes / stride_tensor,
+                    pred_kpts,
+                )
             # Masks loss
-            masks = batch["masks"].to(self.device).float()
-            if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
-                masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
+            if "masks" in batch:
+                masks = batch["masks"].to(self.device).float()
+                if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
+                    masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
 
-            loss[3] = self.calculate_segmentation_loss(
-                fg_mask,
-                masks,
-                target_gt_idx,
-                target_bboxes,
-                batch_idx,
-                proto,
-                pred_masks,
-                imgsz,
-                self.overlap,
-            )
+                loss[3] = self.calculate_segmentation_loss(
+                    fg_mask,
+                    masks,
+                    target_gt_idx,
+                    target_bboxes,
+                    batch_idx,
+                    proto,
+                    pred_masks,
+                    imgsz,
+                    self.overlap,
+                )
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
