@@ -19,6 +19,7 @@ from ultralytics.nn.tasks import (
     WorldModel,
     YOLOEModel,
     YOLOESegModel,
+    PoseSegmentationModel,
 )
 from ultralytics.utils import ROOT, YAML
 
@@ -50,7 +51,7 @@ class YOLO(Model):
         >>> model = YOLO("yolo11n.yaml")
     """
 
-    def __init__(self, model: str | Path = "yolo11n.pt", task: str | None = None, verbose: bool = False):
+    def __init__(self, model: str | Path = "yolo11n.pt", task: str | None = None, verbose: bool = False, scale: str | None = None):
         """Initialize a YOLO model.
 
         This constructor initializes a YOLO model, automatically switching to specialized model types (YOLOWorld or
@@ -58,7 +59,7 @@ class YOLO(Model):
 
         Args:
             model (str | Path): Model name or path to model file, i.e. 'yolo11n.pt', 'yolo11n.yaml'.
-            task (str, optional): YOLO task specification, i.e. 'detect', 'segment', 'classify', 'pose', 'obb'. Defaults
+            task (str, optional): YOLO task specification, i.e. 'detect', 'segment', 'classify', 'pose', 'obb', 'pose_segment'. Defaults
                 to auto-detection based on model.
             verbose (bool): Display model info on load.
         """
@@ -73,7 +74,7 @@ class YOLO(Model):
             self.__dict__ = new_instance.__dict__
         else:
             # Continue with default YOLO initialization
-            super().__init__(model=model, task=task, verbose=verbose)
+            super().__init__(model=model, task=task, verbose=verbose, scale=scale)
             if hasattr(self.model, "model") and "RTDETR" in self.model.model[-1]._get_name():  # if RTDETR head
                 from ultralytics import RTDETR
 
@@ -108,6 +109,12 @@ class YOLO(Model):
                 "trainer": yolo.pose.PoseTrainer,
                 "validator": yolo.pose.PoseValidator,
                 "predictor": yolo.pose.PosePredictor,
+            },
+            "pose_segment": {
+                "model": PoseSegmentationModel,
+                "trainer": yolo.pose_segment.PoseSegmentationTrainer,
+                "validator": yolo.pose_segment.PoseSegmentationValidator,
+                "predictor": yolo.pose_segment.PoseSegmentationPredictor,
             },
             "obb": {
                 "model": OBBModel,
@@ -323,11 +330,11 @@ class YOLOE(Model):
             self.predictor.model.names = classes
 
     def val(
-        self,
-        validator=None,
-        load_vp: bool = False,
-        refer_data: str | None = None,
-        **kwargs,
+            self,
+            validator=None,
+            load_vp: bool = False,
+            refer_data: str | None = None,
+            **kwargs,
     ):
         """Validate the model using text or visual prompts.
 
@@ -349,13 +356,13 @@ class YOLOE(Model):
         return validator.metrics
 
     def predict(
-        self,
-        source=None,
-        stream: bool = False,
-        visual_prompts: dict[str, list] = {},
-        refer_image=None,
-        predictor=yolo.yoloe.YOLOEVPDetectPredictor,
-        **kwargs,
+            self,
+            source=None,
+            stream: bool = False,
+            visual_prompts: dict[str, list] = {},
+            refer_image=None,
+            predictor=yolo.yoloe.YOLOEVPDetectPredictor,
+            **kwargs,
     ):
         """Run prediction on images, videos, directories, streams, etc.
 

@@ -79,10 +79,11 @@ class Model(torch.nn.Module):
     """
 
     def __init__(
-        self,
-        model: str | Path | Model = "yolo11n.pt",
-        task: str | None = None,
-        verbose: bool = False,
+            self,
+            model: str | Path | Model = "yolo11n.pt",
+            task: str | None = None,
+            verbose: bool = False,
+            scale: str | None = None,
     ) -> None:
         """Initialize a new instance of the YOLO model class.
 
@@ -139,7 +140,7 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose)
+            self._new(model, task=task, verbose=verbose, scale=scale)
         else:
             self._load(model, task=task)
 
@@ -147,10 +148,10 @@ class Model(torch.nn.Module):
         del self.training
 
     def __call__(
-        self,
-        source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
-        stream: bool = False,
-        **kwargs: Any,
+            self,
+            source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
+            stream: bool = False,
+            **kwargs: Any,
     ) -> list:
         """Alias for the predict method, enabling the model instance to be callable for predictions.
 
@@ -223,7 +224,7 @@ class Model(torch.nn.Module):
 
         return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
+    def _new(self, cfg: str, task=None, model=None, verbose=False, scale: str | None = None) -> None:
         """Initialize a new model and infer the task type from model definitions.
 
         Creates a new model instance based on the provided configuration file. Loads the model configuration, infers the
@@ -245,6 +246,8 @@ class Model(torch.nn.Module):
             >>> model._new("yolo11n.yaml", task="detect", verbose=True)
         """
         cfg_dict = yaml_model_load(cfg)
+        if scale is not None:
+            cfg_dict['scale'] = scale
         self.cfg = cfg
         self.task = task or guess_model_task(cfg_dict)
         self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
@@ -445,10 +448,10 @@ class Model(torch.nn.Module):
         self.model.fuse()
 
     def embed(
-        self,
-        source: str | Path | int | list | tuple | np.ndarray | torch.Tensor = None,
-        stream: bool = False,
-        **kwargs: Any,
+            self,
+            source: str | Path | int | list | tuple | np.ndarray | torch.Tensor = None,
+            stream: bool = False,
+            **kwargs: Any,
     ) -> list:
         """Generate image embeddings based on the provided source.
 
@@ -475,11 +478,11 @@ class Model(torch.nn.Module):
         return self.predict(source, stream, **kwargs)
 
     def predict(
-        self,
-        source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
-        stream: bool = False,
-        predictor=None,
-        **kwargs: Any,
+            self,
+            source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
+            stream: bool = False,
+            predictor=None,
+            **kwargs: Any,
     ) -> list[Results]:
         """Perform predictions on the given image source using the YOLO model.
 
@@ -535,11 +538,11 @@ class Model(torch.nn.Module):
         return self.predictor.predict_cli(source=source) if is_cli else self.predictor(source=source, stream=stream)
 
     def track(
-        self,
-        source: str | Path | int | list | tuple | np.ndarray | torch.Tensor = None,
-        stream: bool = False,
-        persist: bool = False,
-        **kwargs: Any,
+            self,
+            source: str | Path | int | list | tuple | np.ndarray | torch.Tensor = None,
+            stream: bool = False,
+            persist: bool = False,
+            **kwargs: Any,
     ) -> list[Results]:
         """Conduct object tracking on the specified input source using the registered trackers.
 
@@ -578,9 +581,9 @@ class Model(torch.nn.Module):
         return self.predict(source=source, stream=stream, **kwargs)
 
     def val(
-        self,
-        validator=None,
-        **kwargs: Any,
+            self,
+            validator=None,
+            **kwargs: Any,
     ):
         """Validate the model using a specified dataset and validation configuration.
 
@@ -663,8 +666,8 @@ class Model(torch.nn.Module):
         )
 
     def export(
-        self,
-        **kwargs: Any,
+            self,
+            **kwargs: Any,
     ) -> str:
         """Export the model to a different format suitable for deployment.
 
@@ -709,9 +712,9 @@ class Model(torch.nn.Module):
         return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
 
     def train(
-        self,
-        trainer=None,
-        **kwargs: Any,
+            self,
+            trainer=None,
+            **kwargs: Any,
     ):
         """Train the model using the specified dataset and training configuration.
 
@@ -750,14 +753,14 @@ class Model(torch.nn.Module):
                 LOGGER.warning("using HUB training arguments, ignoring local training arguments.")
             kwargs = self.session.train_args  # overwrite kwargs
 
-        checks.check_pip_update_available()
+        # checks.check_pip_update_available()
 
         if isinstance(kwargs.get("pretrained", None), (str, Path)):
             self.load(kwargs["pretrained"])  # load pretrained weights if provided
         overrides = YAML.load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
         custom = {
             # NOTE: handle the case when 'cfg' includes 'data'.
-            "data": overrides.get("data") or DEFAULT_CFG_DICT["data"] or TASK2DATA[self.task],
+            "data": overrides.get("data") or DEFAULT_CFG_DICT["data"] or TASK2DATA.get(self.task) or kwargs.get("data"),
             "model": self.overrides["model"],
             "task": self.task,
         }  # method defaults
@@ -780,11 +783,11 @@ class Model(torch.nn.Module):
         return self.metrics
 
     def tune(
-        self,
-        use_ray=False,
-        iterations=10,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            use_ray=False,
+            iterations=10,
+            *args: Any,
+            **kwargs: Any,
     ):
         """Conduct hyperparameter tuning for the model, with an option to use Ray Tune.
 

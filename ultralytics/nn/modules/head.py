@@ -14,13 +14,12 @@ from torch.nn.init import constant_, xavier_uniform_
 from ultralytics.utils import NOT_MACOS14
 from ultralytics.utils.tal import dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_inference_mode
-
 from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN
 from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "OBB", "Classify", "Detect", "Pose", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
+__all__ = "OBB", "Classify", "Detect", "Pose", "PoseSegment", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
 
 
 class Detect(nn.Module):
@@ -382,6 +381,10 @@ class Pose(Detect):
             y[:, 0::ndim] = (y[:, 0::ndim] * 2.0 + (self.anchors[0] - 0.5)) * self.strides
             y[:, 1::ndim] = (y[:, 1::ndim] * 2.0 + (self.anchors[1] - 0.5)) * self.strides
             return y
+
+
+class PoseSegment(Pose):
+    ...
 
 
 class Classify(nn.Module):
@@ -767,7 +770,7 @@ class YOLOESegment(YOLOEDetect):
     """
 
     def __init__(
-        self, nc: int = 80, nm: int = 32, npr: int = 256, embed: int = 512, with_bn: bool = False, ch: tuple = ()
+            self, nc: int = 80, nm: int = 32, npr: int = 256, embed: int = 512, with_bn: bool = False, ch: tuple = ()
     ):
         """Initialize YOLOESegment with class count, mask parameters, and embedding dimensions.
 
@@ -856,23 +859,23 @@ class RTDETRDecoder(nn.Module):
     dynamic = False
 
     def __init__(
-        self,
-        nc: int = 80,
-        ch: tuple = (512, 1024, 2048),
-        hd: int = 256,  # hidden dim
-        nq: int = 300,  # num queries
-        ndp: int = 4,  # num decoder points
-        nh: int = 8,  # num head
-        ndl: int = 6,  # num decoder layers
-        d_ffn: int = 1024,  # dim of feedforward
-        dropout: float = 0.0,
-        act: nn.Module = nn.ReLU(),
-        eval_idx: int = -1,
-        # Training args
-        nd: int = 100,  # num denoising
-        label_noise_ratio: float = 0.5,
-        box_noise_scale: float = 1.0,
-        learnt_init_query: bool = False,
+            self,
+            nc: int = 80,
+            ch: tuple = (512, 1024, 2048),
+            hd: int = 256,  # hidden dim
+            nq: int = 300,  # num queries
+            ndp: int = 4,  # num decoder points
+            nh: int = 8,  # num head
+            ndl: int = 6,  # num decoder layers
+            d_ffn: int = 1024,  # dim of feedforward
+            dropout: float = 0.0,
+            act: nn.Module = nn.ReLU(),
+            eval_idx: int = -1,
+            # Training args
+            nd: int = 100,  # num denoising
+            label_noise_ratio: float = 0.5,
+            box_noise_scale: float = 1.0,
+            learnt_init_query: bool = False,
     ):
         """Initialize the RTDETRDecoder module with the given parameters.
 
@@ -984,11 +987,11 @@ class RTDETRDecoder(nn.Module):
 
     @staticmethod
     def _generate_anchors(
-        shapes: list[list[int]],
-        grid_size: float = 0.05,
-        dtype: torch.dtype = torch.float32,
-        device: str = "cpu",
-        eps: float = 1e-2,
+            shapes: list[list[int]],
+            grid_size: float = 0.05,
+            dtype: torch.dtype = torch.float32,
+            device: str = "cpu",
+            eps: float = 1e-2,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate anchor bounding boxes for given shapes with specific grid size and validate them.
 
@@ -1012,7 +1015,7 @@ class RTDETRDecoder(nn.Module):
 
             valid_WH = torch.tensor([w, h], dtype=dtype, device=device)
             grid_xy = (grid_xy.unsqueeze(0) + 0.5) / valid_WH  # (1, h, w, 2)
-            wh = torch.ones_like(grid_xy, dtype=dtype, device=device) * grid_size * (2.0**i)
+            wh = torch.ones_like(grid_xy, dtype=dtype, device=device) * grid_size * (2.0 ** i)
             anchors.append(torch.cat([grid_xy, wh], -1).view(-1, h * w, 4))  # (1, h*w, 4)
 
         anchors = torch.cat(anchors, 1)  # (1, h*w*nl, 4)
@@ -1048,11 +1051,11 @@ class RTDETRDecoder(nn.Module):
         return feats, shapes
 
     def _get_decoder_input(
-        self,
-        feats: torch.Tensor,
-        shapes: list[list[int]],
-        dn_embed: torch.Tensor | None = None,
-        dn_bbox: torch.Tensor | None = None,
+            self,
+            feats: torch.Tensor,
+            shapes: list[list[int]],
+            dn_embed: torch.Tensor | None = None,
+            dn_bbox: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Generate and prepare the input required for the decoder from the provided features and shapes.
 
