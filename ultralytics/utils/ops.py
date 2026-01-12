@@ -435,8 +435,6 @@ def resample_segments(segments: list | np.ndarray, n: int = 1000):
     """
     if isinstance(segments, list):
         return [resample_segments(s, n) for s in segments]
-    if len(segments) >= n:
-        return segments
     segments = np.concatenate((segments, segments[0:1, :]), axis=0)
     x = np.linspace(0, len(segments) - 1, n - len(segments) if len(segments) < n else n)
     xp = np.arange(len(segments))

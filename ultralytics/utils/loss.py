@@ -298,6 +298,7 @@ class v8DetectionLoss:
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
 
@@ -398,6 +399,7 @@ class v8SegmentationLoss(v8DetectionLoss):
         loss[2] *= self.hyp.cls  # cls gain
         loss[3] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl)
 
     @staticmethod
@@ -579,6 +581,7 @@ class v8PoseLoss(v8DetectionLoss):
         loss[3] *= self.hyp.cls  # cls gain
         loss[4] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, pose, kobj, cls, dfl)
 
     @staticmethod
@@ -776,6 +779,7 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
         loss[4] *= self.hyp.cls  # cls gain
         loss[5] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, pose, kobj, cls, dfl)
 
 
@@ -885,6 +889,7 @@ class v8OBBLoss(v8DetectionLoss):
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
     def bbox_decode(
