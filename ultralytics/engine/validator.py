@@ -24,6 +24,7 @@ Usage - formats:
 """
 
 import json
+import pickle
 import time
 from pathlib import Path
 
@@ -201,32 +202,38 @@ class BaseValidator:
         self.init_metrics(unwrap_model(model))
         self.jdict = []  # empty before each val
         for batch_i, batch in enumerate(bar):
-            self.run_callbacks("on_val_batch_start")
-            self.batch_i = batch_i
-            # Preprocess
-            with dt[0]:
-                batch = self.preprocess(batch)
+            try:
+                self.run_callbacks("on_val_batch_start")
+                self.batch_i = batch_i
+                # Preprocess
+                with dt[0]:
+                    batch = self.preprocess(batch)
 
-            # Inference
-            with dt[1]:
-                preds = model(batch["img"], augment=augment)
+                # Inference
+                with dt[1]:
+                    preds = model(batch["img"], augment=augment)
 
-            # Loss
-            with dt[2]:
-                if self.training:
-                    self.loss += model.loss(batch, preds)[1]
+                # Loss
+                with dt[2]:
+                    if self.training:
+                        self.loss += model.loss(batch, preds)[1]
 
-            # Postprocess
-            with dt[3]:
-                preds = self.postprocess(preds)
+                # Postprocess
+                with dt[3]:
+                    preds = self.postprocess(preds)
 
-            self.update_metrics(preds, batch)
-            if self.args.plots and batch_i < 3 and RANK in {-1, 0}:
-                self.plot_val_samples(batch, batch_i)
-                self.plot_predictions(batch, preds, batch_i)
+                self.update_metrics(preds, batch)
+                if self.args.plots and (self.args.plots_count == -1 or batch_i < self.args.plots_count) and RANK in {-1, 0}:
+                    self.plot_val_samples(batch, batch_i)
+                    self.plot_predictions(batch, preds, batch_i)
 
-            self.run_callbacks("on_val_batch_end")
-
+                self.run_callbacks("on_val_batch_end")
+            except Exception as e:
+                dump_file = self.save_dir / f"error_val_{getattr(self, 'epoch') if hasattr(self, 'epoch') else ''}_{batch_i}.pkl"
+                print(f'Dumping batch to {dump_file} for debugging...')
+                with open(dump_file, "wb") as f:
+                    pickle.dump((e, batch), f)
+                print(e)
         stats = {}
         self.gather_stats()
         if RANK in {-1, 0}:
@@ -264,7 +271,7 @@ class BaseValidator:
             return stats
 
     def match_predictions(
-        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
+            self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
     ) -> torch.Tensor:
         """Match predictions to ground truth objects using IoU.
 

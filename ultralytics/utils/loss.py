@@ -126,6 +126,7 @@ class BboxLoss(nn.Module):
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+        assert torch.isfinite(loss_iou).all().item(), f"none finite loss_iou value detected {loss_iou=} {target_scores_sum=} {weight=}"
 
         # DFL loss
         if self.dfl_loss:
@@ -280,7 +281,7 @@ class v8DetectionLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[1] = self.bce(torch.clamp(pred_scores, -10, 10), target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
@@ -298,6 +299,7 @@ class v8DetectionLoss:
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {loss=} {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
 
@@ -359,7 +361,7 @@ class v8SegmentationLoss(v8DetectionLoss):
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[2] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[2] = self.bce(torch.clamp(pred_scores, -10, 10), target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
@@ -398,6 +400,7 @@ class v8SegmentationLoss(v8DetectionLoss):
         loss[2] *= self.hyp.cls  # cls gain
         loss[3] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {loss=} {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl)
 
     @staticmethod
@@ -545,7 +548,7 @@ class v8PoseLoss(v8DetectionLoss):
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[3] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[3] = self.bce(torch.clamp(pred_scores, -10, 10), target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
@@ -558,7 +561,6 @@ class v8PoseLoss(v8DetectionLoss):
                 target_scores_sum,
                 fg_mask,
             )
-            # pose loss
             keypoints = batch["keypoints"].to(self.device).float().clone()
             keypoints[..., 0] *= imgsz[1]
             keypoints[..., 1] *= imgsz[0]
@@ -579,6 +581,7 @@ class v8PoseLoss(v8DetectionLoss):
         loss[3] *= self.hyp.cls  # cls gain
         loss[4] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {loss=} {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, pose, kobj, cls, dfl)
 
     @staticmethod
@@ -719,7 +722,7 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[4] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[4] = self.bce(torch.clamp(pred_scores, -10, 10), target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
@@ -765,6 +768,7 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
                     self.overlap,
                 )
 
+
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
@@ -776,6 +780,7 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
         loss[4] *= self.hyp.cls  # cls gain
         loss[5] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {loss=} {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, pose, kobj, cls, dfl)
 
 
@@ -870,7 +875,7 @@ class v8OBBLoss(v8DetectionLoss):
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[1] = self.bce(torch.clamp(pred_scores, -10, 10), target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
@@ -885,6 +890,7 @@ class v8OBBLoss(v8DetectionLoss):
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
+        assert torch.isfinite(loss).all().item(), f"non-finite loss value detected {loss=} {batch.get('batch_idx')=} {batch.get('im_file')=}"
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
     def bbox_decode(
