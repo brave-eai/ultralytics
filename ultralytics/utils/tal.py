@@ -118,6 +118,8 @@ class TaskAlignedAssigner(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         target_scores = target_scores * norm_align_metric
 
+        assert torch.isfinite(target_scores).all().item(), f"non-finite target_scores detected" + ('\n'.join([f'{k}={v}' for k, v in locals().items()]))
+
         return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
 
     def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
@@ -216,7 +218,7 @@ class TaskAlignedAssigner(nn.Module):
         ones = torch.ones_like(topk_idxs[:, :, :1], dtype=torch.int8, device=topk_idxs.device)
         for k in range(self.topk):
             # Expand topk_idxs for each value of k and add 1 at the specified positions
-            count_tensor.scatter_add_(-1, topk_idxs[:, :, k : k + 1], ones)
+            count_tensor.scatter_add_(-1, topk_idxs[:, :, k: k + 1], ones)
         # Filter invalid bboxes
         count_tensor.masked_fill_(count_tensor > 1, 0)
 

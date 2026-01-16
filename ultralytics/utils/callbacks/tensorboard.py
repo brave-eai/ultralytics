@@ -1,4 +1,5 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+import traceback
 
 from ultralytics.utils import LOGGER, SETTINGS, TESTS_RUNNING, colorstr, torch_utils
 
@@ -14,7 +15,8 @@ try:
     import torch
     from torch.utils.tensorboard import SummaryWriter
 
-except (ImportError, AssertionError, TypeError, AttributeError):
+except (ImportError, AssertionError, TypeError, AttributeError) as e:
+    traceback.print_exc()
     # TypeError for handling 'Descriptors cannot not be created directly.' protobuf errors in Windows
     # AttributeError: module 'tensorflow' has no attribute 'io' if 'tensorflow' not installed
     SummaryWriter = None
@@ -106,6 +108,11 @@ def on_train_epoch_end(trainer) -> None:
     _log_scalars(trainer.lr, trainer.epoch + 1)
 
 
+def on_train_batch_end(trainer) -> None:
+    """Log scalar statistics at the end of a training batch."""
+    _log_scalars(trainer.label_loss_items(trainer.loss_items, prefix="batch"), trainer.global_step)
+
+
 def on_fit_epoch_end(trainer) -> None:
     """Log epoch metrics at end of training epoch."""
     _log_scalars(trainer.metrics, trainer.epoch + 1)
@@ -117,6 +124,7 @@ callbacks = (
         "on_train_start": on_train_start,
         "on_fit_epoch_end": on_fit_epoch_end,
         "on_train_epoch_end": on_train_epoch_end,
+        "on_train_batch_end": on_train_batch_end,
     }
     if SummaryWriter
     else {}

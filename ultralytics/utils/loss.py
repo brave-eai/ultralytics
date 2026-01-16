@@ -126,7 +126,7 @@ class BboxLoss(nn.Module):
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
-        assert torch.isfinite(loss_iou).all().item(), f"none finite loss_iou value detected {loss_iou=} {target_scores_sum=} {weight=}"
+        assert torch.isfinite(loss_iou).all().item(), f"none finite loss_iou value detected {loss_iou=} {iou=} {target_scores_sum=} {weight=}"
 
         # DFL loss
         if self.dfl_loss:
@@ -396,7 +396,7 @@ class v8SegmentationLoss(v8DetectionLoss):
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
 
         loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.box  # seg gain
+        loss[1] *= self.hyp.seg  # seg gain
         loss[2] *= self.hyp.cls  # cls gain
         loss[3] *= self.hyp.dfl  # dfl gain
 
@@ -576,8 +576,7 @@ class v8PoseLoss(v8DetectionLoss):
             )
 
         loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.pose  # pose gain
-        loss[2] *= self.hyp.kobj  # kobj gain
+
         loss[3] *= self.hyp.cls  # cls gain
         loss[4] *= self.hyp.dfl  # dfl gain
 
@@ -709,6 +708,9 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
         pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, 17, 3)
 
+        assert torch.isfinite(pred_scores).all().item(), f"non-finite pred_scores detected" + ('\n'.join([f'{k}={v}' for k, v in locals().items()]))
+        assert torch.isfinite(pred_bboxes).all().item(), f"non-finite pred_bboxes detected" + ('\n'.join([f'{k}={v}' for k, v in locals().items()]))
+
         _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
             pred_scores.detach().sigmoid(),
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
@@ -776,7 +778,7 @@ class v8PoseSegmentationLoss(v8SegmentationLoss, v8PoseLoss):
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.pose  # pose gain
         loss[2] *= self.hyp.kobj  # kobj gain
-        loss[3] *= self.hyp.box  # seg gain
+        loss[3] *= self.hyp.seg  # seg gain
         loss[4] *= self.hyp.cls  # cls gain
         loss[5] *= self.hyp.dfl  # dfl gain
 

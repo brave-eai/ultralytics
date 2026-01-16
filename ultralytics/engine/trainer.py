@@ -174,6 +174,7 @@ class BaseTrainer:
         self.fitness = None
         self.loss = None
         self.tloss = None
+        self.global_step = 0
         self.loss_names = ["Loss"]
         self.csv = self.save_dir / "results.csv"
         if self.csv.exists() and not self.args.resume:
@@ -407,6 +408,7 @@ class BaseTrainer:
                     self.run_callbacks("on_train_batch_start")
                     # Warmup
                     ni = i + nb * epoch
+                    self.global_step = ni
                     if ni <= nw:
                         xi = [0, nw]  # x interp
                         self.accumulate = max(1, int(np.interp(ni, xi, [1, self.args.nbs / self.batch_size]).round()))

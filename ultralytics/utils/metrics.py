@@ -127,6 +127,9 @@ def bbox_iou(
 
     # IoU
     iou = inter / union
+    if not torch.isfinite(iou).all().item():
+        LOGGER.warning(f"Non-finite IoU encountered {iou}")
+    iou = torch.clamp(iou, min=0.0, max=1.0)
     if CIoU or DIoU or GIoU:
         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height

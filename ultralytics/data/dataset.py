@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
+from filelock import FileLock
 from torch.utils.data import ConcatDataset
 
 from ultralytics.utils import LOCAL_RANK, LOGGER, NUM_THREADS, TQDM, colorstr
@@ -167,12 +168,13 @@ class YOLODataset(BaseDataset):
         """
         self.label_files = img2label_paths(self.im_files, task=self.task)
         cache_path = Path(self.label_files[0]).parent.with_suffix(".cache")
-        try:
-            cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
-            assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
-            assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
-        except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError, gzip.BadGzipFile):
-            cache, exists = self.cache_labels(cache_path), False  # run cache ops
+        with FileLock(Path(cache_path).with_suffix(".lock")):
+            try:
+                cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
+                assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
+                assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
+            except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError, gzip.BadGzipFile):
+                cache, exists = self.cache_labels(cache_path), False  # run cache ops
 
         # Display cache
         nf, nm, ne, nc, n = cache.pop("results")  # found, missing, empty, corrupt, total
@@ -573,19 +575,20 @@ class GroundingDataset(YOLODataset):
             (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
         """
         cache_path = Path(self.json_file).with_suffix(".cache")
-        try:
-            cache, _ = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
-            assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
-            assert cache["hash"] == get_hash(self.json_file)  # identical hash
-        except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError):
-            cache, _ = self.cache_labels(cache_path), False  # run cache ops
-        [cache.pop(k) for k in ("hash", "version")]  # remove items
-        labels = cache["labels"]
-        self.verify_labels(labels)
-        self.im_files = [str(label["im_file"]) for label in labels]
-        if LOCAL_RANK in {-1, 0}:
-            LOGGER.info(f"Load {self.json_file} from cache file {cache_path}")
-        return labels
+        with FileLock(cache_path.with_suffix(".lock")):
+            try:
+                cache, _ = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
+                assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
+                assert cache["hash"] == get_hash(self.json_file)  # identical hash
+            except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError, EOFError, gzip.BadGzipFile):
+                cache, _ = self.cache_labels(cache_path), False  # run cache ops
+            [cache.pop(k) for k in ("hash", "version")]  # remove items
+            labels = cache["labels"]
+            self.verify_labels(labels)
+            self.im_files = [str(label["im_file"]) for label in labels]
+            if LOCAL_RANK in {-1, 0}:
+                LOGGER.info(f"Load {self.json_file} from cache file {cache_path}")
+            return labels
 
     def build_transforms(self, hyp: dict | None = None) -> Compose:
         """Configure augmentations for training with optional text loading.
