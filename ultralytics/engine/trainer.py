@@ -327,11 +327,13 @@ class BaseTrainer:
         )
         # Note: When training DOTA dataset, double batch size could get OOM on images with >2000 objects.
         self.test_loader = self.get_dataloader(
-            self.data.get("val") or self.data.get("test"),
+            ((self.data["train"] if self.args.train_as_val else None) or self.data.get("val") or self.data.get("test")),
             batch_size=batch_size if self.args.task == "obb" else batch_size * 2,
             rank=LOCAL_RANK,
             mode="val",
         )
+        if self.args.train_as_val:
+            assert set(self.train_loader.dataset.im_files) == set(self.test_loader.dataset.im_files), f"`train_as_val` is set but train and val datasets differ\n {len(self.train_loader.dataset.im_files)=} {self.train_loader.dataset.im_files[:10]=}\n {len(self.train_loader.dataset.im_files)=} {self.test_loader.dataset.im_files[:10]}\n."
         self.validator = self.get_validator()
         self.ema = ModelEMA(self.model)
         if RANK in {-1, 0}:
